@@ -1,0 +1,185 @@
+# ClawX Enhanced Release Workflow
+# Builds and publishes releases for macOS, Windows, and Linux
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 0.2.0-beta.4)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            platform: mac
+          - os: windows-latest
+            platform: win
+          - os: ubuntu-latest
+            platform: linux
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        working-directory: files.manuscdn.com/clawx-enhanced-electron
+        run: pnpm install
+
+      - name: Build macOS
+        if: matrix.platform == 'mac'
+        working-directory: files.manuscdn.com/clawx-enhanced-electron
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.MAC_CERTS }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTS_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: pnpm build:mac
+
+      - name: Build Windows
+        if: matrix.platform == 'win'
+        working-directory: files.manuscdn.com/clawx-enhanced-electron
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm build:win
+
+      - name: Build Linux
+        if: matrix.platform == 'linux'
+        working-directory: files.manuscdn.com/clawx-enhanced-electron
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm build:linux
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.platform }}
+          path: |
+            files.manuscdn.com/clawx-enhanced-electron/release/*.dmg
+            files.manuscdn.com/clawx-enhanced-electron/release/*.zip
+            files.manuscdn.com/clawx-enhanced-electron/release/*.exe
+            files.manuscdn.com/clawx-enhanced-electron/release/*.AppImage
+            files.manuscdn.com/clawx-enhanced-electron/release/*.deb
+            files.manuscdn.com/clawx-enhanced-electron/release/*.rpm
+            files.manuscdn.com/clawx-enhanced-electron/release/*.yml
+            !files.manuscdn.com/clawx-enhanced-electron/release/builder-debug.yml
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: List downloaded artifacts
+        run: |
+          echo "=== Downloaded artifacts ==="
+          find release-artifacts/ -type f -exec ls -lh {} \;
+
+      - name: Remove duplicate builder-debug files
+        run: |
+          find release-artifacts/ -name "builder-debug.yml" -delete -print || true
+
+      - name: Get version from tag or input
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            release-artifacts/**/*.dmg
+            release-artifacts/**/*.zip
+            release-artifacts/**/*.exe
+            release-artifacts/**/*.AppImage
+            release-artifacts/**/*.deb
+            release-artifacts/**/*.rpm
+            release-artifacts/**/*.yml
+          draft: false
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') }}
+          generate_release_notes: false
+          body: |
+            ## 🚀 ClawX Enhanced ${{ steps.version.outputs.version }}
+
+            ClawX Enhanced — 集成 OpenClaw + OpenCode 的双引擎桌面 AI 助手
+
+            ### 📦 下载
+
+            请根据您的操作系统和架构选择对应的安装包：
+
+            #### macOS
+            - **Apple Silicon (M1/M2/M3/M4)**：`ClawX-Enhanced-*-mac-arm64.dmg`
+            - **Intel (x64)**：`ClawX-Enhanced-*-mac-x64.dmg`
+
+            #### Windows
+            - **安装程序 (x64)**：`ClawX-Enhanced-*-win-x64.exe`
+
+            #### Linux
+            - **AppImage (x64)**：`ClawX-Enhanced-*-linux-x86_64.AppImage`（通用格式，推荐）
+            - **Debian/Ubuntu (x64)**：`ClawX-Enhanced-*-linux-amd64.deb`
+
+            ### ⚠️ 安装注意事项
+
+            - **macOS**：首次启动可能提示"无法验证开发者"，请前往「系统设置 → 隐私与安全性」允许运行
+            - **Windows**：SmartScreen 可能拦截安装程序，点击"更多信息" → "仍要运行"继续安装
+            - **Linux AppImage**：首次运行前请执行 `chmod +x ClawX-Enhanced-*.AppImage` 添加执行权限
+
+            ---
+
+            💬 遇到问题？请提交 [Issue](https://github.com/${{ github.repository }}/issues)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
