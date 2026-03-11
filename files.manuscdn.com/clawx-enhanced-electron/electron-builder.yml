@@ -1,0 +1,46 @@
+appId: com.clawx.enhanced
+productName: ClawX Enhanced
+copyright: Copyright © 2025 ClawX Enhanced Team
+
+directories:
+  output: release
+  buildResources: resources
+
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - resources/**/*
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: resources/icon.png
+  publisherName: ClawX Enhanced
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: ClawX Enhanced
+  installerIcon: resources/icon.png
+  uninstallerIcon: resources/icon.png
+  installerHeaderIcon: resources/icon.png
+
+mac:
+  target:
+    - dmg
+  icon: resources/icon.png
+  category: public.app-category.developer-tools
+
+linux:
+  target:
+    - AppImage
+  icon: resources/icon.png
+  category: Development
+
+extraResources:
+  - from: resources/
+    to: resources/
